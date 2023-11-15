@@ -91,8 +91,8 @@ impl SigningHttpClient {
 
     /// Signs the request before calling `oauth2::reqwest::http_client`.
     fn execute(&self, mut request: HttpRequest) -> Result<HttpResponse, impl std::error::Error> {
-        let signed_url = self.sign_url(request.url, &request.method, &request.body);
-        request.url = signed_url;
+        let signed_url = self.sign_url(request.uri(), &request.method(), &request.body());
+        *request.uri_mut() = signed_url;
         oauth2::reqwest::http_client(request)
     }
 
@@ -103,7 +103,7 @@ impl SigningHttpClient {
     /// query.
     ///
     /// See http://api-docs.letterboxd.com/#signing.
-    fn sign_url(&self, mut url: Url, method: &http::method::Method, body: &[u8]) -> Url {
+    fn sign_url(&self, mut url: Url, method: &http::Method, body: &[u8]) -> Url {
         let nonce = uuid::Uuid::new_v4(); // use UUID as random and unique nonce
 
         let timestamp = time::SystemTime::now()

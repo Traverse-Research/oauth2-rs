@@ -29,21 +29,22 @@ fn mock_http_client(
 ) -> impl Fn(HttpRequest) -> Result<HttpResponse, FakeError> {
     move |request: HttpRequest| {
         assert_eq!(
-            &request.url,
+            request.uri().to_string(),
             request_url
                 .as_ref()
                 .unwrap_or(&Url::parse("https://example.com/token").unwrap())
+                .to_string()
         );
         assert_eq!(
-            request.headers,
+            request.headers(),
             request_headers
                 .iter()
                 .map(|(name, value)| (name.clone(), HeaderValue::from_str(value).unwrap()))
-                .collect(),
+                .collect::<Vec<_>>(),
         );
-        assert_eq!(&String::from_utf8(request.body).unwrap(), request_body);
+        assert_eq!(std::str::from_utf8(&request.body()).unwrap(), request_body);
 
-        Ok(response.clone())
+        Ok(response)
     }
 }
 

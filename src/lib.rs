@@ -1176,32 +1176,12 @@ impl<'a> AuthorizationRequest<'a> {
 ///
 /// An HTTP request.
 ///
-#[derive(Clone, Debug)]
-pub struct HttpRequest {
-    // These are all owned values so that the request can safely be passed between
-    // threads.
-    /// URL to which the HTTP request is being made.
-    pub url: Url,
-    /// HTTP request method for this request.
-    pub method: http::method::Method,
-    /// HTTP request headers to send.
-    pub headers: HeaderMap,
-    /// HTTP request body (typically for POST requests only).
-    pub body: Vec<u8>,
-}
+pub type HttpRequest = http::Request<Vec<u8>>;
 
 ///
 /// An HTTP response.
 ///
-#[derive(Clone, Debug)]
-pub struct HttpResponse {
-    /// HTTP status code returned by the server.
-    pub status_code: http::status::StatusCode,
-    /// HTTP response headers returned by the server.
-    pub headers: HeaderMap,
-    /// HTTP response body returned by the server.
-    pub body: Vec<u8>,
-}
+pub type HttpResponse = http::Response<Vec<u8>>;
 
 ///
 /// A request to exchange an authorization code for an access token.
@@ -2029,12 +2009,13 @@ fn endpoint_request<'a>(
         .finish()
         .into_bytes();
 
-    HttpRequest {
-        url: url.to_owned(),
-        method: http::method::Method::POST,
-        headers,
-        body,
-    }
+    let mut builder = http::Request::builder()
+        // TODO: url crate vs http::Uri?
+        .uri(url.to_string())
+        .method(http::Method::POST);
+    // TODO: Do this the other way around
+    *builder.headers_mut().unwrap() = headers;
+    builder.body(body).expect("Infallible")
 }
 
 fn endpoint_response<RE, TE, DO>(
@@ -2049,7 +2030,7 @@ where
 
     check_response_body(&http_response)?;
 
-    let response_body = http_response.body.as_slice();
+    let response_body = http_response.body().as_slice();
     serde_path_to_error::deserialize(&mut serde_json::Deserializer::from_slice(response_body))
         .map_err(|e| RequestTokenError::Parse(e, response_body.to_vec()))
 }
@@ -2071,8 +2052,8 @@ where
     RE: Error + 'static,
     TE: ErrorResponse,
 {
-    if http_response.status_code != StatusCode::OK {
-        let reason = http_response.body.as_slice();
+    if http_response.status() != StatusCode::OK {
+        let reason = http_response.body().as_slice();
         if reason.is_empty() {
             return Err(RequestTokenError::Other(
                 "Server returned empty error response".to_string(),
@@ -2100,7 +2081,7 @@ where
 {
     // Validate that the response Content-Type is JSON.
     http_response
-        .headers
+        .headers()
         .get(CONTENT_TYPE)
         .map_or(Ok(()), |content_type|
             // Section 3.1.1.1 of RFC 7231 indicates that media types are case insensitive and
@@ -2121,7 +2102,7 @@ where
             }
         )?;
 
-    if http_response.body.is_empty() {
+    if http_response.body().is_empty() {
         return Err(RequestTokenError::Other(
             "Server returned empty response body".to_string(),
         ));

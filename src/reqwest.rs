@@ -12,9 +12,6 @@ pub enum Error {
     /// Non-reqwest HTTP error.
     #[error("HTTP error")]
     Http(#[from] http::Error),
-    /// I/O error.
-    #[error("I/O error")]
-    Io(#[from] std::io::Error),
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -24,6 +21,9 @@ pub use async_client::async_http_client;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod blocking {
+
+    use std::convert::TryFrom;
+
     use super::super::{HttpRequest, HttpResponse};
     use super::Error;
 
@@ -31,7 +31,18 @@ mod blocking {
     use reqwest::blocking;
     use reqwest::redirect::Policy as RedirectPolicy;
 
-    use std::io::Read;
+    fn reqwest_to_http_response(response: blocking::Response) -> Result<HttpResponse, Error> {
+        // TODO: Conversion to `http` types should happen upstream in `reqwest`: https://github.com/seanmonstar/reqwest/pull/1954#discussion_r1394232154
+        // Ok(response.into())
+        let mut builder = http::Response::builder()
+            .status(response.status())
+            .version(response.version());
+        // TODO: Do this the other way around
+        *builder.headers_mut().unwrap() = response.headers().clone();
+        // TODO: The returned value should be infallible?
+        let body = response.bytes()?.to_vec();
+        Ok(builder.body(body)?)
+    }
 
     ///
     /// Synchronous HTTP client.
@@ -42,31 +53,33 @@ mod blocking {
             .redirect(RedirectPolicy::none())
             .build()?;
 
-        let mut request_builder = client
-            .request(request.method, request.url.as_str())
-            .body(request.body);
-
-        for (name, value) in &request.headers {
-            request_builder = request_builder.header(name.as_str(), value.as_bytes());
-        }
-        let mut response = client.execute(request_builder.build()?)?;
-
-        let mut body = Vec::new();
-        response.read_to_end(&mut body)?;
-
-        Ok(HttpResponse {
-            status_code: response.status(),
-            headers: response.headers().to_owned(),
-            body,
-        })
+        let request = blocking::Request::try_from(request)?;
+        let response = client.execute(request)?;
+        reqwest_to_http_response(response)
     }
 }
 
 mod async_client {
+
+    use std::convert::TryFrom;
+
     use super::super::{HttpRequest, HttpResponse};
     use super::Error;
 
     pub use reqwest;
+
+    async fn reqwest_to_http_response(response: reqwest::Response) -> Result<HttpResponse, Error> {
+        // TODO: Conversion to `http` types should happen upstream in `reqwest`: https://github.com/seanmonstar/reqwest/pull/1954#discussion_r1394232154
+        // Ok(response.into())
+        let mut builder = http::Response::builder()
+            .status(response.status())
+            .version(response.version());
+        // TODO: Do this the other way around
+        *builder.headers_mut().unwrap() = response.headers().clone();
+        // TODO: The returned value should be infallible?
+        let body = response.bytes().await?.to_vec();
+        Ok(builder.body(body)?)
+    }
 
     ///
     /// Asynchronous HTTP client.
@@ -83,23 +96,9 @@ mod async_client {
             builder.build()?
         };
 
-        let mut request_builder = client
-            .request(request.method, request.url.as_str())
-            .body(request.body);
-        for (name, value) in &request.headers {
-            request_builder = request_builder.header(name.as_str(), value.as_bytes());
-        }
-        let request = request_builder.build()?;
+        let request = reqwest::Request::try_from(request)?;
 
         let response = client.execute(request).await?;
-
-        let status_code = response.status();
-        let headers = response.headers().to_owned();
-        let chunks = response.bytes().await?;
-        Ok(HttpResponse {
-            status_code,
-            headers,
-            body: chunks.to_vec(),
-        })
+        reqwest_to_http_response(response).await
     }
 }

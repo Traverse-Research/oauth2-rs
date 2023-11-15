@@ -1,9 +1,3 @@
-use http::{
-    header::{HeaderMap, HeaderValue, CONTENT_TYPE},
-    method::Method,
-    status::StatusCode,
-};
-
 use super::{HttpRequest, HttpResponse};
 
 ///
@@ -30,44 +24,9 @@ pub enum Error {
 /// Synchronous HTTP client for ureq.
 ///
 pub fn http_client(request: HttpRequest) -> Result<HttpResponse, Error> {
-    let mut req = if let Method::POST = request.method {
-        ureq::post(&request.url.to_string())
-    } else {
-        ureq::get(&request.url.to_string())
-    };
-
-    for (name, value) in request.headers {
-        if let Some(name) = name {
-            req = req.set(
-                &name.to_string(),
-                value.to_str().map_err(|_| {
-                    Error::Other(format!(
-                        "invalid {} header value {:?}",
-                        name,
-                        value.as_bytes()
-                    ))
-                })?,
-            );
-        }
-    }
-
-    let response = if let Method::POST = request.method {
-        req.send_bytes(&request.body)
-    } else {
-        req.call()
-    }
-    .map_err(Box::new)?;
-
-    Ok(HttpResponse {
-        status_code: StatusCode::from_u16(response.status())
-            .map_err(|err| Error::Http(err.into()))?,
-        headers: vec![(
-            CONTENT_TYPE,
-            HeaderValue::from_str(response.content_type())
-                .map_err(|err| Error::Http(err.into()))?,
-        )]
-        .into_iter()
-        .collect::<HeaderMap>(),
-        body: response.into_string()?.as_bytes().into(),
-    })
+    let (parts, body) = request.into_parts();
+    let request = ureq::Request::from(parts);
+    let response = request.send_bytes(&body).unwrap();
+    let response = HttpResponse::from(response);
+    Ok(response)
 }
